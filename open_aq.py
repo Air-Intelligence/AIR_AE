@@ -47,8 +47,8 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-# FastAPI 앱 생성
-app = FastAPI(
+# FastAPI 앱 생성 (이름을 default 대신 air_api로 변경)
+air_api = FastAPI(
     title="OpenAQ PM2.5 API",
     description="OpenAQ 실측 데이터 기반 대기질 API",
     version="1.0.0",
@@ -56,7 +56,7 @@ app = FastAPI(
 )
 
 # CORS 설정
-app.add_middleware(
+air_api.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
@@ -65,18 +65,7 @@ app.add_middleware(
 )
 
 
-@app.get("/")
-async def root():
-    return {
-        "message": "OpenAQ PM2.5 API",
-        "version": "1.0.0",
-        "endpoints": [
-            "/api/pm25/nearest"
-        ]
-    }
-
-
-@app.get("/api/pm25/nearest")
+@air_api.get("/api/pm25/nearest")
 async def get_pm25_nearest(
         lat: float = Query(..., description="사용자 위도"),
         lon: float = Query(..., description="사용자 경도"),
@@ -114,4 +103,4 @@ async def get_pm25_nearest(
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("open_aq:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("open_aq:air_api", host="0.0.0.0", port=8000, reload=True)
