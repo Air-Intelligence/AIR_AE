@@ -44,7 +44,7 @@ jobs:
           username: ${{ secrets.GCE_USER }}
           key: ${{ secrets.GCE_SSH_KEY }}
           script: |
-            cd /home/ubuntu/rowing/react
+            cd /home/ubuntu/rowing/fastapi
             docker compose down || true
             docker compose pull
             docker compose up -d
