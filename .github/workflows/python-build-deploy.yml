@@ -37,14 +37,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: SSH and deploy with docker compose
-        uses: appleboy/ssh-action@v0.1.7
+      - name: Deploy to GCE via SSH
+        uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.GCE_HOST }}
           username: ${{ secrets.GCE_USER }}
           key: ${{ secrets.GCE_SSH_KEY }}
           script: |
-            cd /home/ubuntu/rowing/fastapi
+            cd /home/ubuntu/rowing/react
             docker compose down || true
             docker compose pull
             docker compose up -d
