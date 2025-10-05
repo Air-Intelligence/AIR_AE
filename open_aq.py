@@ -26,14 +26,13 @@ MODEL_DIR = MODEL_PATH.parent
 TEMPO_PARQUET_PATH = Path("/mnt/data/features/tempo/nrt_roll3d/nrt_merged.parquet")
 OPENAQ_PARQUET_PATH = Path("/mnt/data/features/openaq/openaq_nrt.parquet")
 O3_STATIC_PARQUET_PATH = Path("/mnt/data/features/tempo/o3_static.parquet")
-AIRNOW_CSV_PATH = Path("/mnt/data/raw/AirNow/current_observations.csv")
 OPENAQ_LATEST_CSV_PATH = Path("/mnt/data/raw/OpenAQ/latest_observations.csv")
 
 POLLUTANT_SCALING: Dict[str, float] = {"no2": 1e15, "o3": 1e15}
 POLLUTANT_UNITS: Dict[str, str] = {
     "no2": "x10^15 molecules/cm^2",
     "o3": "x10^15 molecules/cm^2",
-    "pm25": "ug/m^3",
+    "pm25": "ug/m³",
 }
 
 DataFrameLoader = Callable[[Path], pd.DataFrame]
@@ -109,12 +108,6 @@ DATASETS: Dict[str, DataSetCache] = {
         postprocess=_with_parsed_time(errors="coerce"),
         name="TEMPO O3 static data",
     ),
-    "airnow": DataSetCache(
-        path=AIRNOW_CSV_PATH,
-        reader=_read_csv,
-        postprocess=_with_parsed_time(errors="coerce"),
-        name="AirNow observations",
-    ),
     "openaq_latest": DataSetCache(
         path=OPENAQ_LATEST_CSV_PATH,
         reader=_read_csv,
@@ -138,10 +131,6 @@ def load_o3_static_data(force: bool = False) -> pd.DataFrame:
 
 def load_tempo_o3_data(force: bool = False) -> pd.DataFrame:
     return DATASETS["o3_static"].load(force=force)
-
-
-def load_airnow_data(force: bool = False) -> pd.DataFrame:
-    return DATASETS["airnow"].load(force=force)
 
 
 def load_openaq_latest_data(force: bool = False) -> pd.DataFrame:
@@ -234,11 +223,10 @@ def _latest_timeframe(df: pd.DataFrame) -> tuple[pd.Timestamp, pd.DataFrame]:
 
 DOWNLOAD_HINTS = {
     "o3_static": "python scripts/download/download_o3_static.py",
-    "airnow": "python scripts/download/download_airnow.py",
     "openaq_latest": "python scripts/download/download_openaq_latest.py",
 }
 
-WARMUP_KEYS = ("tempo", "openaq", "o3_static", "airnow", "openaq_latest")
+WARMUP_KEYS = ("tempo", "openaq", "o3_static", "openaq_latest")
 
 
 @asynccontextmanager
@@ -320,7 +308,7 @@ def predict_pm25_lgbm(req: PredictReq):
 @app.get("/")
 async def root():
     return {
-        "message": "TEMPO + OpenAQ + AirNow NRT API",
+        "message": "TEMPO + OpenAQ NRT API",
         "version": "1.0.0",
         "endpoints": {
             "tempo": [
@@ -335,10 +323,6 @@ async def root():
                 "/api/pm25/latest",
                 "/api/pm25/timeseries",
                 "/api/pm25/latest_csv",
-            ],
-            "airnow": [
-                "/api/airnow/latest",
-                "/api/airnow/stations",
             ],
             "combined": [
                 "/api/combined/latest",
@@ -739,10 +723,8 @@ async def compare_predictions():
     import numpy as np
 
     try:
-        try:
-            df_ground_truth = load_openaq_latest_data()
-        except FileNotFoundError:
-            df_ground_truth = load_airnow_data()
+        df_ground_truth = load_openaq_latest_data()
+
 
         df_tempo = load_tempo_data()
         df_o3 = load_o3_static_data()
