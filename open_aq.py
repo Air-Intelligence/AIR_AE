@@ -199,16 +199,66 @@ def _nearest_or_mean(
     lon: float,
     value_col: str,
     radius: float = 0.05,
-) -> float:
+    return_distance: bool = False,
+) -> float | tuple[float, float]:
+    """
+    Get nearest or mean value within radius.
+
+    Args:
+        df: DataFrame with lat, lon, and value columns
+        lat: Target latitude
+        lon: Target longitude
+        value_col: Column name to extract value from
+        radius: Search radius in degrees
+        return_distance: If True, also return distance in km
+
+    Returns:
+        Value (float) or (value, distance_km) tuple if return_distance=True
+    """
     nearby = df[
         df["lat"].between(lat - radius, lat + radius)
         & df["lon"].between(lon - radius, lon + radius)
     ]
-    if not nearby.empty:
-        return float(nearby[value_col].mean())
 
+    if not nearby.empty:
+        value = float(nearby[value_col].mean())
+        if return_distance:
+            # Calculate mean distance using haversine
+            import numpy as np
+            nearby_lats = np.deg2rad(nearby["lat"].values)
+            nearby_lons = np.deg2rad(nearby["lon"].values)
+            lat_rad = np.deg2rad(lat)
+            lon_rad = np.deg2rad(lon)
+
+            dlat = nearby_lats - lat_rad
+            dlon = nearby_lons - lon_rad
+            a = np.sin(dlat/2)**2 + np.cos(lat_rad) * np.cos(nearby_lats) * np.sin(dlon/2)**2
+            c = 2 * np.arcsin(np.sqrt(a))
+            dist_km = 6371.0088 * c  # Earth radius in km
+            mean_dist = float(np.mean(dist_km))
+            return value, mean_dist
+        return value
+
+    # Nearest point fallback
     idx = ((df["lat"] - lat) ** 2 + (df["lon"] - lon) ** 2).idxmin()
-    return float(df.loc[idx, value_col])
+    value = float(df.loc[idx, value_col])
+
+    if return_distance:
+        # Calculate haversine distance to nearest point
+        import numpy as np
+        nearest_lat = np.deg2rad(df.loc[idx, "lat"])
+        nearest_lon = np.deg2rad(df.loc[idx, "lon"])
+        lat_rad = np.deg2rad(lat)
+        lon_rad = np.deg2rad(lon)
+
+        dlat = nearest_lat - lat_rad
+        dlon = nearest_lon - lon_rad
+        a = np.sin(dlat/2)**2 + np.cos(lat_rad) * np.cos(nearest_lat) * np.sin(dlon/2)**2
+        c = 2 * np.arcsin(np.sqrt(a))
+        dist_km = float(6371.0088 * c)
+        return value, dist_km
+
+    return value
 
 
 def _ensure_variable(df: pd.DataFrame, variable: str) -> None:
@@ -300,7 +350,8 @@ def predict_pm25_lgbm(req: PredictReq):
 
         f_no2 = _nearest_or_mean(snapshot_no2, req.lat, req.lon, "no2")
         f_o3 = _nearest_or_mean(snapshot_o3, req.lat, req.lon, "o3")
-        f_pm25_lag1 = _nearest_or_mean(snapshot_obs, req.lat, req.lon, "pm25")
+        # Get PM2.5 lag1 and distance to nearest observation point
+        f_pm25_lag1, dist_km = _nearest_or_mean(snapshot_obs, req.lat, req.lon, "pm25", return_distance=True)
 
         # Time encoding (matching training features)
         hour_sin = np.sin(2 * np.pi * when.hour / 24)
@@ -309,18 +360,19 @@ def predict_pm25_lgbm(req: PredictReq):
         dow_cos = np.cos(2 * np.pi * when.dayofweek / 7)
 
         # Build features matching training (9 features total)
-        # Feature order: no2, o3, pm25_lag1, pm25_lag3, hour_sin, hour_cos, dow_sin, dow_cos
+        # Feature order MUST match: ['no2', 'o3', 'dist_km', 'hour_sin', 'hour_cos', 'dow_sin', 'dow_cos', 'pm25_lag1', 'pm25_lag3']
         features = pd.DataFrame(
             [
                 {
                     "no2": f_no2,
                     "o3": f_o3,
-                    "pm25_lag1": f_pm25_lag1,
-                    "pm25_lag3": f_pm25_lag1,  # Use lag1 as approximation for lag3
+                    "dist_km": dist_km,
                     "hour_sin": hour_sin,
                     "hour_cos": hour_cos,
                     "dow_sin": dow_sin,
                     "dow_cos": dow_cos,
+                    "pm25_lag1": f_pm25_lag1,
+                    "pm25_lag3": f_pm25_lag1,  # Use lag1 as approximation for lag3
                 }
             ]
         ).fillna(0.0)
@@ -340,6 +392,7 @@ def predict_pm25_lgbm(req: PredictReq):
                 "no2": f_no2,
                 "o3": f_o3,
                 "pm25_lag1": f_pm25_lag1,
+                "dist_km": dist_km,
                 "hour": when.hour,
                 "dow": when.dayofweek,
                 "obs_time": obs_time.isoformat()
