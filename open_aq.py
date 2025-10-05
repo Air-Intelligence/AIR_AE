@@ -283,6 +283,7 @@ app.add_middleware(
 @app.post("/api/predict/pm25")
 def predict_pm25_lgbm(req: PredictReq):
     import time
+    import numpy as np
     start_time = time.time()
 
     when = _parse_request_time(req.when)
@@ -299,18 +300,27 @@ def predict_pm25_lgbm(req: PredictReq):
 
         f_no2 = _nearest_or_mean(snapshot_no2, req.lat, req.lon, "no2")
         f_o3 = _nearest_or_mean(snapshot_o3, req.lat, req.lon, "o3")
-        f_obs = _nearest_or_mean(snapshot_obs, req.lat, req.lon, "pm25")
+        f_pm25_lag1 = _nearest_or_mean(snapshot_obs, req.lat, req.lon, "pm25")
 
+        # Time encoding (matching training features)
+        hour_sin = np.sin(2 * np.pi * when.hour / 24)
+        hour_cos = np.cos(2 * np.pi * when.hour / 24)
+        dow_sin = np.sin(2 * np.pi * when.dayofweek / 7)
+        dow_cos = np.cos(2 * np.pi * when.dayofweek / 7)
+
+        # Build features matching training (9 features total)
+        # Feature order: no2, o3, pm25_lag1, pm25_lag3, hour_sin, hour_cos, dow_sin, dow_cos
         features = pd.DataFrame(
             [
                 {
-                    "lat": req.lat,
-                    "lon": req.lon,
-                    "hour": when.hour,
-                    "dow": when.dayofweek,
-                    "tempo_no2": f_no2,
-                    "tempo_o3": f_o3,
-                    "pm25_obs": f_obs,
+                    "no2": f_no2,
+                    "o3": f_o3,
+                    "pm25_lag1": f_pm25_lag1,
+                    "pm25_lag3": f_pm25_lag1,  # Use lag1 as approximation for lag3
+                    "hour_sin": hour_sin,
+                    "hour_cos": hour_cos,
+                    "dow_sin": dow_sin,
+                    "dow_cos": dow_cos,
                 }
             ]
         ).fillna(0.0)
@@ -324,7 +334,16 @@ def predict_pm25_lgbm(req: PredictReq):
         return {
             "when": when.isoformat(),
             "pred_pm25": y,
-            "features": {**features.iloc[0].to_dict(), "obs_time": obs_time.isoformat()},
+            "features": {
+                "lat": req.lat,
+                "lon": req.lon,
+                "no2": f_no2,
+                "o3": f_o3,
+                "pm25_lag1": f_pm25_lag1,
+                "hour": when.hour,
+                "dow": when.dayofweek,
+                "obs_time": obs_time.isoformat()
+            },
             "model": MODEL_PATH.name,
         }
 
