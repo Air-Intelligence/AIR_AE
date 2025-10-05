@@ -29,4 +29,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/ || exit 1
 
 # Run the application
-CMD ["uvicorn", "open_aq:air_api", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "open_aq:app", "--host", "0.0.0.0", "--port", "8000"]
