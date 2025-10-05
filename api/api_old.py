@@ -1,15 +1,35 @@
+"""
+TEMPO NRT 데이터 FastAPI 백엔드
+실시간 대기질 데이터 제공 API
+"""
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional, List
-from contextlib import asynccontextmanager
 import pandas as pd
+import numpy as np
+from datetime import datetime
 from pathlib import Path
+
+# FastAPI 앱 생성
+app = FastAPI(
+    title="TEMPO NRT API",
+    description="NASA TEMPO 실시간 대기질 데이터 API",
+    version="1.0.0"
+)
+
+# CORS 설정 (프론트엔드 연동용)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 프로덕션에서는 특정 도메인만 허용
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # 글로벌 변수로 데이터 캐싱 (서버 시작 시 한 번만 로드)
 df_tempo_cache: Optional[pd.DataFrame] = None
 df_openaq_cache: Optional[pd.DataFrame] = None
 
-# download_realtime_data.py로 다운받은 TEMPO NO₂ 실시간 데이터 사용
 TEMPO_PARQUET_PATH = Path("/mnt/data/features/tempo/nrt_roll3d/nrt_merged.parquet")
 OPENAQ_PARQUET_PATH = Path("/mnt/data/features/openaq/openaq_nrt.parquet")
 
@@ -44,10 +64,9 @@ def load_openaq_data() -> pd.DataFrame:
     return df_openaq_cache
 
 
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
-    """서버 시작/종료 시 실행되는 lifespan 이벤트"""
-    # Startup
+@app.on_event("startup")
+async def startup_event():
+    """서버 시작 시 데이터 미리 로드"""
     try:
         load_tempo_data()
     except FileNotFoundError as e:
@@ -59,28 +78,6 @@ async def lifespan(_app: FastAPI):
         print(f"⚠️  OpenAQ data not found: {e}")
 
     print("✓ TEMPO NRT API server started")
-
-    yield
-
-    # Shutdown (필요시 정리 작업 추가)
-
-
-# FastAPI 앱 생성
-app = FastAPI(
-    title="TEMPO NRT API",
-    description="NASA TEMPO 실시간 대기질 데이터 API",
-    version="1.0.0",
-    lifespan=lifespan
-)
-
-# CORS 설정 (프론트엔드 연동용)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # 프로덕션에서는 특정 도메인만 허용
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 @app.get("/")
@@ -129,7 +126,7 @@ async def get_stats():
             "lat_max": float(df['lat'].max()),
             "lon_min": float(df['lon'].min()),
             "lon_max": float(df['lon'].max()),
-            "unique_locations": len(df[['lat', 'lon']].drop_duplicates())
+            "unique_locations": len(df[['lat','lon']].drop_duplicates())
         },
         "variables": {
             "no2": {
@@ -440,114 +437,12 @@ async def get_combined_latest():
     }
 
 
-@app.post("/api/predict")
-async def predict_pm25(
-    lat: float = Query(..., description="위도"),
-    lon: float = Query(..., description="경도"),
-    city: str = Query("San Francisco", description="도시명")
-):
-    """
-    PM2.5 예측 (1시간 후)
-
-    입력: lat, lon, city
-    출력: PM2.5 예측값 + 신뢰구간
-    """
-    from src.features import extract_near
-    from src.model import get_predictor
-    from datetime import datetime
-
-    try:
-        # 1. TEMPO NO₂ 로드 (캐시 또는 실시간 데이터)
-        df_tempo = load_tempo_data()
-
-        # 최신 2개 시간 추출 (t, t-1)
-        tempo_times = sorted(df_tempo['time'].unique())
-        if len(tempo_times) < 2:
-            raise HTTPException(
-                status_code=503,
-                detail="Insufficient TEMPO data (need at least 2 time points)"
-            )
-
-        time_t = tempo_times[-1]
-        time_t1 = tempo_times[-2]
-
-        # 2. (lat, lon) 근처 NO₂ 추출
-        no2_t = extract_near(df_tempo, lat, lon, time=time_t, value_col='no2')
-        no2_lag1 = extract_near(df_tempo, lat, lon, time=time_t1, value_col='no2')
-
-        if no2_t is None or no2_lag1 is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No TEMPO NO₂ data near ({lat}, {lon})"
-            )
-
-        # 3. OpenAQ O₃ 로드
-        df_o3 = load_openaq_data()
-
-        o3_times = sorted(df_o3['time'].unique())
-        if len(o3_times) < 2:
-            raise HTTPException(
-                status_code=503,
-                detail="Insufficient OpenAQ O₃ data"
-            )
-
-        o3_time_t = o3_times[-1]
-        o3_time_t1 = o3_times[-2]
-
-        # 4. (lat, lon) 근처 O₃ 추출
-        o3_t = extract_near(df_o3, lat, lon, time=o3_time_t, value_col='o3')
-        o3_lag1 = extract_near(df_o3, lat, lon, time=o3_time_t1, value_col='o3')
-
-        if o3_t is None or o3_lag1 is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No OpenAQ O₃ data near ({lat}, {lon})"
-            )
-
-        # 5. 시간 피처
-        hour = time_t.hour
-        dow = time_t.dayofweek
-
-        # 6. 예측
-        predictor = get_predictor(model_dir="/mnt/data/models")
-        result = predictor.predict(no2_t, no2_lag1, o3_t, o3_lag1, hour, dow)
-
-        # 7. 응답 생성
-        return {
-            "predicted_pm25": result['pm25_pred'],
-            "confidence_lower": result['confidence_lower'],
-            "confidence_upper": result['confidence_upper'],
-            "prediction_time": time_t.isoformat(),
-            "location": {
-                "lat": lat,
-                "lon": lon,
-                "city": city
-            },
-            "inputs": {
-                "no2_current": no2_t,
-                "no2_lag1": no2_lag1,
-                "o3_current": o3_t,
-                "o3_lag1": o3_lag1,
-                "hour": hour,
-                "dow": dow
-            }
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Prediction failed: {str(e)}"
-        )
-
-
 if __name__ == "__main__":
     import uvicorn
 
     # 개발 서버 실행
     uvicorn.run(
-        "open_aq:app",
+        "api:app",
         host="0.0.0.0",
         port=8000,
         reload=True,  # 코드 변경 시 자동 재시작

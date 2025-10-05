@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:earthaccess.readthedocs.io)",
+      "WebFetch(domain:api.openaq.org)",
+      "WebFetch(domain:openaq.medium.com)",
+      "WebFetch(domain:docs.openaq.org)",
+      "WebSearch",
+      "WebFetch(domain:asdc.larc.nasa.gov)",
+      "WebFetch(domain:developers.google.com)",
+      "WebFetch(domain:docs.airnowapi.org)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
