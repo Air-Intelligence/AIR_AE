@@ -51,7 +51,9 @@ class DataSetCache:
 
     def load(self, *, force: bool = False) -> pd.DataFrame:
         if not self.path.exists():
-            raise FileNotFoundError(f"{self.name or self.path.name} not found at {self.path}")
+            raise FileNotFoundError(
+                f"{self.name or self.path.name} not found at {self.path}"
+            )
 
         current_mtime = self.path.stat().st_mtime
         if force or self._cache is None or self._mtime != current_mtime:
@@ -144,7 +146,9 @@ def _get_model() -> joblib.BaseEstimator:
     global _lgbm
     if _lgbm is None:
         if not MODEL_PATH.exists():
-            raise HTTPException(status_code=500, detail=f"Model not found: {MODEL_PATH}")
+            raise HTTPException(
+                status_code=500, detail=f"Model not found: {MODEL_PATH}"
+            )
         _lgbm = joblib.load(MODEL_PATH)
         logger.info("Loaded LGBM model from %s", MODEL_PATH)
     return _lgbm
@@ -163,7 +167,9 @@ def _parse_request_time(raw: Optional[str]) -> pd.Timestamp:
     try:
         ts = pd.to_datetime(raw, utc=True)
     except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid datetime format: {raw}") from exc
+        raise HTTPException(
+            status_code=400, detail=f"Invalid datetime format: {raw}"
+        ) from exc
 
     if isinstance(ts, pd.DatetimeIndex):
         ts = ts[0]
@@ -240,6 +246,8 @@ async def lifespan(_app: FastAPI):
                 logger.warning("%s (hint: %s)", exc, hint)
             else:
                 logger.warning("%s", exc)
+        except Exception as exc:  # 👈 이 두 줄 추가!
+            logger.warning("Warmup skip (%s): %s", key, exc)
 
     logger.info("TEMPO NRT API server started")
     yield
@@ -371,7 +379,9 @@ async def get_stats():
 
 @app.get("/api/latest")
 async def get_latest(
-    variable: str = Query("no2", description="Variable name (e.g. no2, o3, uv_aerosol_index)"),
+    variable: str = Query(
+        "no2", description="Variable name (e.g. no2, o3, uv_aerosol_index)"
+    ),
 ):
     df = load_tempo_data()
     _ensure_variable(df, variable)
@@ -407,7 +417,9 @@ async def get_timeseries(
     ].copy()
 
     if nearby.empty:
-        raise HTTPException(status_code=404, detail=f"No data found near ({lat}, {lon})")
+        raise HTTPException(
+            status_code=404, detail=f"No data found near ({lat}, {lon})"
+        )
 
     ts = nearby.groupby("time")[variable].mean().reset_index().sort_values("time")
 
@@ -434,7 +446,9 @@ async def get_timeseries(
 
 @app.get("/api/heatmap")
 async def get_heatmap(
-    time: Optional[str] = Query(None, description="ISO timestamp (e.g. 2025-10-03T23:00:00)"),
+    time: Optional[str] = Query(
+        None, description="ISO timestamp (e.g. 2025-10-03T23:00:00)"
+    ),
     variable: str = Query("no2", description="Variable name"),
 ):
     df = load_tempo_data()
@@ -444,7 +458,9 @@ async def get_heatmap(
         try:
             target_time = pd.to_datetime(time)
         except (TypeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail=f"Invalid timestamp: {time}") from exc
+            raise HTTPException(
+                status_code=400, detail=f"Invalid timestamp: {time}"
+            ) from exc
 
         time_diff = (df["time"] - target_time).abs()
         closest_time = df.loc[time_diff.idxmin(), "time"]
@@ -569,7 +585,9 @@ async def get_pm25_latest():
     return {
         "time": latest_time.isoformat(),
         "count": len(frame),
-        "data": frame[["lat", "lon", "pm25", "location_name"]].to_dict(orient="records"),
+        "data": frame[["lat", "lon", "pm25", "location_name"]].to_dict(
+            orient="records"
+        ),
     }
 
 
@@ -582,7 +600,9 @@ async def get_pm25_timeseries(
     if location_name:
         df_filtered = df[df["location_name"] == location_name].copy()
         if df_filtered.empty:
-            raise HTTPException(status_code=404, detail=f"Station '{location_name}' not found")
+            raise HTTPException(
+                status_code=404, detail=f"Station '{location_name}' not found"
+            )
         ts = df_filtered.groupby("time")["pm25"].mean().reset_index()
         label = location_name
     else:
@@ -621,7 +641,9 @@ async def get_combined_latest():
             "time": tempo_time.isoformat(),
             "count": len(df_tempo_latest),
             "unit": POLLUTANT_UNITS["no2"],
-            "data": df_tempo_latest[["lat", "lon", "no2", "o3"]].to_dict(orient="records"),
+            "data": df_tempo_latest[["lat", "lon", "no2", "o3"]].to_dict(
+                orient="records"
+            ),
         },
         "openaq": {
             "time": openaq_time.isoformat(),
@@ -713,7 +735,9 @@ async def predict_pm25(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Prediction failed: {exc}") from exc
+        raise HTTPException(
+            status_code=500, detail=f"Prediction failed: {exc}"
+        ) from exc
 
 
 @app.get("/api/compare")
@@ -724,7 +748,6 @@ async def compare_predictions():
 
     try:
         df_ground_truth = load_openaq_latest_data()
-
 
         df_tempo = load_tempo_data()
         df_o3 = load_o3_static_data()
@@ -749,7 +772,9 @@ async def compare_predictions():
         for _, station_row in df_ground_truth.iterrows():
             lat = station_row["lat"]
             lon = station_row["lon"]
-            location_name = station_row.get("location_name", station_row.get("city", "Unknown"))
+            location_name = station_row.get(
+                "location_name", station_row.get("city", "Unknown")
+            )
             pm25_true = station_row.get("pm25", station_row.get("pm25_raw"))
 
             if pm25_true is None:
@@ -781,14 +806,16 @@ async def compare_predictions():
             )
 
         if not results:
-            raise HTTPException(status_code=404, detail="No valid predictions could be made")
+            raise HTTPException(
+                status_code=404, detail="No valid predictions could be made"
+            )
 
         errors = [r["error"] for r in results]
         abs_errors = [r["abs_error"] for r in results]
 
         metrics = {
             "mae": float(np.mean(abs_errors)),
-            "rmse": float(np.sqrt(np.mean([e ** 2 for e in errors]))),
+            "rmse": float(np.sqrt(np.mean([e**2 for e in errors]))),
             "mbe": float(np.mean(errors)),
             "n_stations": len(results),
         }
@@ -803,7 +830,9 @@ async def compare_predictions():
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Comparison failed: {exc}") from exc
+        raise HTTPException(
+            status_code=500, detail=f"Comparison failed: {exc}"
+        ) from exc
 
 
 if __name__ == "__main__":
