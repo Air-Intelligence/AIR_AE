@@ -1,9 +1,11 @@
 ﻿from __future__ import annotations
 
 import logging
+import os
 import sys
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
@@ -13,20 +15,28 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-if not logging.getLogger().handlers:
-    logging.basicConfig(level=logging.INFO)
+# Import project config
+sys.path.append(str(Path(__file__).parent))
+import config
 
-sys.path.append(str(Path(__file__).parent.parent))
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
 
 logger = logging.getLogger("open_aq")
 
-MODEL_PATH = Path("/mnt/data/models/residual_lgbm.pkl")
-MODEL_DIR = MODEL_PATH.parent
+# ============================================================================
+# PATHS (from config.py)
+# ============================================================================
+MODEL_PATH = config.MODELS_DIR / "residual_lgbm.pkl"
+MODEL_DIR = config.MODELS_DIR
 
-TEMPO_PARQUET_PATH = Path("/mnt/data/features/tempo/nrt_roll3d/nrt_merged.parquet")
-OPENAQ_PARQUET_PATH = Path("/mnt/data/features/openaq/openaq_nrt.parquet")
-O3_STATIC_PARQUET_PATH = Path("/mnt/data/features/tempo/o3_static.parquet")
-OPENAQ_LATEST_CSV_PATH = Path("/mnt/data/raw/OpenAQ/latest_observations.csv")
+TEMPO_PARQUET_PATH = config.FEATURES_TEMPO_NRT / "nrt_merged.parquet"
+OPENAQ_PARQUET_PATH = config.FEATURES_OPENAQ / "openaq_nrt.parquet"
+O3_STATIC_PARQUET_PATH = config.FEATURES_DIR / "tempo" / "o3_static.parquet"
+OPENAQ_LATEST_CSV_PATH = config.RAW_OPENAQ / "latest_observations.csv"
 
 POLLUTANT_SCALING: Dict[str, float] = {"no2": 1e15, "o3": 1e15}
 POLLUTANT_UNITS: Dict[str, str] = {
@@ -131,27 +141,22 @@ def load_o3_static_data(force: bool = False) -> pd.DataFrame:
     return DATASETS["o3_static"].load(force=force)
 
 
-def load_tempo_o3_data(force: bool = False) -> pd.DataFrame:
-    return DATASETS["o3_static"].load(force=force)
-
-
 def load_openaq_latest_data(force: bool = False) -> pd.DataFrame:
     return DATASETS["openaq_latest"].load(force=force)
 
 
-_lgbm = None
-
-
+@lru_cache(maxsize=1)
 def _get_model() -> joblib.BaseEstimator:
-    global _lgbm
-    if _lgbm is None:
-        if not MODEL_PATH.exists():
-            raise HTTPException(
-                status_code=500, detail=f"Model not found: {MODEL_PATH}"
-            )
-        _lgbm = joblib.load(MODEL_PATH)
-        logger.info("Loaded LGBM model from %s", MODEL_PATH)
-    return _lgbm
+    """
+    Load LightGBM model (cached with lru_cache for singleton pattern)
+    """
+    if not MODEL_PATH.exists():
+        raise HTTPException(
+            status_code=500, detail=f"Model not found: {MODEL_PATH}"
+        )
+    model = joblib.load(MODEL_PATH)
+    logger.info("Loaded LGBM model from %s", MODEL_PATH)
+    return model
 
 
 class PredictReq(BaseModel):
@@ -260,9 +265,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS configuration
+ALLOWED_ORIGINS = os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000"
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS if ALLOWED_ORIGINS != ["*"] else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -271,50 +282,60 @@ app.add_middleware(
 
 @app.post("/api/predict/pm25")
 def predict_pm25_lgbm(req: PredictReq):
+    import time
+    start_time = time.time()
+
     when = _parse_request_time(req.when)
+    logger.info(f"PM2.5 prediction request: lat={req.lat}, lon={req.lon}, when={when}")
 
-    df_no2 = load_tempo_data()
-    df_o3 = load_tempo_o3_data()
-    df_obs = load_openaq_latest_data()
-
-    snapshot_no2 = _snapshot(df_no2, when)
-    snapshot_o3 = _snapshot(df_o3, when)
-    obs_time, snapshot_obs = _latest_timeframe(df_obs)
-
-    f_no2 = _nearest_or_mean(snapshot_no2, req.lat, req.lon, "no2")
-    f_o3 = _nearest_or_mean(snapshot_o3, req.lat, req.lon, "o3")
-    f_obs = _nearest_or_mean(snapshot_obs, req.lat, req.lon, "pm25")
-
-    features = pd.DataFrame(
-        [
-            {
-                "lat": req.lat,
-                "lon": req.lon,
-                "hour": when.hour,
-                "dow": when.dayofweek,
-                "tempo_no2": f_no2,
-                "tempo_o3": f_o3,
-                "pm25_obs": f_obs,
-            }
-        ]
-    ).fillna(0.0)
-
-    model = _get_model()
     try:
-        y = float(model.predict(features)[0])
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Inference failed: {exc}") from exc
+        df_no2 = load_tempo_data()
+        df_o3 = load_o3_static_data()
+        df_obs = load_openaq_latest_data()
 
-    return {
-        "when": when.isoformat(),
-        "pred_pm25": y,
-        "features": {**features.iloc[0].to_dict(), "obs_time": obs_time.isoformat()},
-        "model": MODEL_PATH.name,
-    }
+        snapshot_no2 = _snapshot(df_no2, when)
+        snapshot_o3 = _snapshot(df_o3, when)
+        obs_time, snapshot_obs = _latest_timeframe(df_obs)
+
+        f_no2 = _nearest_or_mean(snapshot_no2, req.lat, req.lon, "no2")
+        f_o3 = _nearest_or_mean(snapshot_o3, req.lat, req.lon, "o3")
+        f_obs = _nearest_or_mean(snapshot_obs, req.lat, req.lon, "pm25")
+
+        features = pd.DataFrame(
+            [
+                {
+                    "lat": req.lat,
+                    "lon": req.lon,
+                    "hour": when.hour,
+                    "dow": when.dayofweek,
+                    "tempo_no2": f_no2,
+                    "tempo_o3": f_o3,
+                    "pm25_obs": f_obs,
+                }
+            ]
+        ).fillna(0.0)
+
+        model = _get_model()
+        y = float(model.predict(features)[0])
+
+        elapsed = time.time() - start_time
+        logger.info(f"PM2.5 prediction successful: {y:.2f} µg/m³ (took {elapsed:.3f}s)")
+
+        return {
+            "when": when.isoformat(),
+            "pred_pm25": y,
+            "features": {**features.iloc[0].to_dict(), "obs_time": obs_time.isoformat()},
+            "model": MODEL_PATH.name,
+        }
+
+    except Exception as exc:
+        elapsed = time.time() - start_time
+        logger.error(f"PM2.5 prediction failed after {elapsed:.3f}s: {exc}")
+        raise HTTPException(status_code=500, detail=f"Inference failed: {exc}") from exc
 
 
 @app.get("/")
-async def root():
+def root():
     return {
         "message": "TEMPO + OpenAQ NRT API",
         "version": "1.0.0",
@@ -336,16 +357,14 @@ async def root():
                 "/api/combined/latest",
             ],
             "forecast": [
-                "/api/predict",
                 "/api/predict/pm25",
-                "/api/compare",
             ],
         },
     }
 
 
 @app.get("/api/stats")
-async def get_stats():
+def get_stats():
     df = load_tempo_data()
 
     return {
@@ -378,7 +397,7 @@ async def get_stats():
 
 
 @app.get("/api/latest")
-async def get_latest(
+def get_latest(
     variable: str = Query(
         "no2", description="Variable name (e.g. no2, o3, uv_aerosol_index)"
     ),
@@ -400,7 +419,7 @@ async def get_latest(
 
 
 @app.get("/api/timeseries")
-async def get_timeseries(
+def get_timeseries(
     lat: float = Query(..., description="Latitude"),
     lon: float = Query(..., description="Longitude"),
     variable: str = Query("no2", description="Variable name"),
@@ -429,23 +448,23 @@ async def get_timeseries(
         ts[variable] = ts[variable] / factor
         unit = POLLUTANT_UNITS.get(variable)
 
+    # Convert to list of dicts (optimized, avoiding iterrows)
+    data = ts[["time", variable]].to_dict(orient="records")
+    for item in data:
+        item["time"] = item["time"].isoformat()
+        item["value"] = float(item.pop(variable))
+
     return {
         "location": {"lat": lat, "lon": lon},
         "variable": variable,
         "unit": unit,
-        "count": len(ts),
-        "data": [
-            {
-                "time": row["time"].isoformat(),
-                "value": float(row[variable]),
-            }
-            for _, row in ts.iterrows()
-        ],
+        "count": len(data),
+        "data": data,
     }
 
 
 @app.get("/api/heatmap")
-async def get_heatmap(
+def get_heatmap(
     time: Optional[str] = Query(
         None, description="ISO timestamp (e.g. 2025-10-03T23:00:00)"
     ),
@@ -486,7 +505,7 @@ async def get_heatmap(
 
 
 @app.get("/api/grid")
-async def get_grid(
+def get_grid(
     lat_min: float = Query(..., description="Minimum latitude"),
     lat_max: float = Query(..., description="Maximum latitude"),
     lon_min: float = Query(..., description="Minimum longitude"),
@@ -535,7 +554,7 @@ async def get_grid(
 
 
 @app.get("/api/pm25/latest_csv")
-async def get_pm25_latest_csv(
+def get_pm25_latest_csv(
     force: bool = Query(False, description="Ignore cache and reload file"),
 ):
     df = load_openaq_latest_data(force=force)
@@ -552,7 +571,7 @@ async def get_pm25_latest_csv(
 
 
 @app.get("/api/pm25/stations")
-async def get_pm25_stations():
+def get_pm25_stations():
     df = load_openaq_data()
 
     latest = (
@@ -561,23 +580,21 @@ async def get_pm25_stations():
         .tail(1)
     )
 
+    # Convert to list of dicts (optimized, avoiding iterrows)
+    stations = latest[["lat", "lon", "location_name", "pm25", "time"]].to_dict(orient="records")
+    for station in stations:
+        station["name"] = station.pop("location_name")
+        station["pm25"] = float(station["pm25"])
+        station["time"] = station["time"].isoformat()
+
     return {
-        "count": len(latest),
-        "stations": [
-            {
-                "lat": row["lat"],
-                "lon": row["lon"],
-                "name": row["location_name"],
-                "pm25": float(row["pm25"]),
-                "time": row["time"].isoformat(),
-            }
-            for _, row in latest.iterrows()
-        ],
+        "count": len(stations),
+        "stations": stations,
     }
 
 
 @app.get("/api/pm25/latest")
-async def get_pm25_latest():
+def get_pm25_latest():
     df = load_openaq_data()
 
     latest_time, frame = _latest_timeframe(df)
@@ -592,7 +609,7 @@ async def get_pm25_latest():
 
 
 @app.get("/api/pm25/timeseries")
-async def get_pm25_timeseries(
+def get_pm25_timeseries(
     location_name: Optional[str] = Query(None, description="Station name"),
 ):
     df = load_openaq_data()
@@ -611,21 +628,21 @@ async def get_pm25_timeseries(
 
     ts = ts.sort_values("time")
 
+    # Convert to list of dicts (optimized, avoiding iterrows)
+    data = ts[["time", "pm25"]].to_dict(orient="records")
+    for item in data:
+        item["time"] = item["time"].isoformat()
+        item["pm25"] = float(item["pm25"])
+
     return {
         "location": label,
-        "count": len(ts),
-        "data": [
-            {
-                "time": row["time"].isoformat(),
-                "pm25": float(row["pm25"]),
-            }
-            for _, row in ts.iterrows()
-        ],
+        "count": len(data),
+        "data": data,
     }
 
 
 @app.get("/api/combined/latest")
-async def get_combined_latest():
+def get_combined_latest():
     df_tempo = load_tempo_data()
     tempo_time, df_tempo_latest = _latest_timeframe(df_tempo)
 
@@ -656,183 +673,189 @@ async def get_combined_latest():
     }
 
 
-@app.post("/api/predict")
-async def predict_pm25(
-    lat: float = Query(..., description="Latitude"),
-    lon: float = Query(..., description="Longitude"),
-    city: str = Query("San Francisco", description="City"),
-):
-    from src.features import extract_near
-    from src.model import get_predictor
+# ============================================================================
+# 아래 엔드포인트들은 누락된 모델 파일 (pm25_lgbm.pkl, feature_scaler.pkl,
+# feature_info.json)에 의존하므로 비활성화됨
+# /api/predict/pm25 엔드포인트가 동일한 PM2.5 예측 기능을 제공함
+# ============================================================================
 
-    try:
-        df_tempo = load_tempo_data()
-        tempo_times = sorted(df_tempo["time"].unique())
-        if len(tempo_times) < 2:
-            raise HTTPException(
-                status_code=503,
-                detail="Insufficient TEMPO data (need at least 2 time points)",
-            )
+# @app.post("/api/predict")
+# async def predict_pm25(
+#     lat: float = Query(..., description="Latitude"),
+#     lon: float = Query(..., description="Longitude"),
+#     city: str = Query("San Francisco", description="City"),
+# ):
+#     from src.features import extract_near
+#     from src.model import get_predictor
+#
+#     try:
+#         df_tempo = load_tempo_data()
+#         tempo_times = sorted(df_tempo["time"].unique())
+#         if len(tempo_times) < 2:
+#             raise HTTPException(
+#                 status_code=503,
+#                 detail="Insufficient TEMPO data (need at least 2 time points)",
+#             )
+#
+#         time_t = tempo_times[-1]
+#         time_t1 = tempo_times[-2]
+#
+#         no2_t = extract_near(df_tempo, lat, lon, time=time_t, value_col="no2")
+#         no2_lag1 = extract_near(df_tempo, lat, lon, time=time_t1, value_col="no2")
+#
+#         if no2_t is None or no2_lag1 is None:
+#             raise HTTPException(
+#                 status_code=404,
+#                 detail=f"No TEMPO NO2 data near ({lat}, {lon})",
+#             )
+#
+#         df_o3 = load_o3_static_data()
+#         o3_times = sorted(df_o3["time"].unique())
+#         if len(o3_times) < 2:
+#             raise HTTPException(
+#                 status_code=503,
+#                 detail="Insufficient O3 static data",
+#             )
+#
+#         o3_time_t = o3_times[-1]
+#         o3_time_t1 = o3_times[-2]
+#
+#         o3_t = extract_near(df_o3, lat, lon, time=o3_time_t, value_col="o3")
+#         o3_lag1 = extract_near(df_o3, lat, lon, time=o3_time_t1, value_col="o3")
+#
+#         if o3_t is None or o3_lag1 is None:
+#             raise HTTPException(
+#                 status_code=404,
+#                 detail=f"No O3 data near ({lat}, {lon})",
+#             )
+#
+#         hour = time_t.hour
+#         dow = time_t.dayofweek
+#
+#         predictor = get_predictor(model_dir=str(MODEL_DIR))
+#         result = predictor.predict(no2_t, no2_lag1, o3_t, o3_lag1, hour, dow)
+#
+#         return {
+#             "predicted_pm25": result["pm25_pred"],
+#             "confidence_lower": result["confidence_lower"],
+#             "confidence_upper": result["confidence_upper"],
+#             "prediction_time": time_t.isoformat(),
+#             "location": {
+#                 "lat": lat,
+#                 "lon": lon,
+#                 "city": city,
+#             },
+#             "inputs": {
+#                 "no2_current": no2_t,
+#                 "no2_lag1": no2_lag1,
+#                 "o3_current": o3_t,
+#                 "o3_lag1": o3_lag1,
+#                 "hour": hour,
+#                 "dow": dow,
+#             },
+#         }
+#
+#     except HTTPException:
+#         raise
+#     except Exception as exc:
+#         raise HTTPException(
+#             status_code=500, detail=f"Prediction failed: {exc}"
+#         ) from exc
 
-        time_t = tempo_times[-1]
-        time_t1 = tempo_times[-2]
 
-        no2_t = extract_near(df_tempo, lat, lon, time=time_t, value_col="no2")
-        no2_lag1 = extract_near(df_tempo, lat, lon, time=time_t1, value_col="no2")
-
-        if no2_t is None or no2_lag1 is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No TEMPO NO2 data near ({lat}, {lon})",
-            )
-
-        df_o3 = load_o3_static_data()
-        o3_times = sorted(df_o3["time"].unique())
-        if len(o3_times) < 2:
-            raise HTTPException(
-                status_code=503,
-                detail="Insufficient O3 static data",
-            )
-
-        o3_time_t = o3_times[-1]
-        o3_time_t1 = o3_times[-2]
-
-        o3_t = extract_near(df_o3, lat, lon, time=o3_time_t, value_col="o3")
-        o3_lag1 = extract_near(df_o3, lat, lon, time=o3_time_t1, value_col="o3")
-
-        if o3_t is None or o3_lag1 is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No O3 data near ({lat}, {lon})",
-            )
-
-        hour = time_t.hour
-        dow = time_t.dayofweek
-
-        predictor = get_predictor(model_dir=str(MODEL_DIR))
-        result = predictor.predict(no2_t, no2_lag1, o3_t, o3_lag1, hour, dow)
-
-        return {
-            "predicted_pm25": result["pm25_pred"],
-            "confidence_lower": result["confidence_lower"],
-            "confidence_upper": result["confidence_upper"],
-            "prediction_time": time_t.isoformat(),
-            "location": {
-                "lat": lat,
-                "lon": lon,
-                "city": city,
-            },
-            "inputs": {
-                "no2_current": no2_t,
-                "no2_lag1": no2_lag1,
-                "o3_current": o3_t,
-                "o3_lag1": o3_lag1,
-                "hour": hour,
-                "dow": dow,
-            },
-        }
-
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500, detail=f"Prediction failed: {exc}"
-        ) from exc
-
-
-@app.get("/api/compare")
-async def compare_predictions():
-    from src.features import extract_near
-    from src.model import get_predictor
-    import numpy as np
-
-    try:
-        df_ground_truth = load_openaq_latest_data()
-
-        df_tempo = load_tempo_data()
-        df_o3 = load_o3_static_data()
-
-        tempo_times = sorted(df_tempo["time"].unique())
-        o3_times = sorted(df_o3["time"].unique())
-
-        if len(tempo_times) < 2 or len(o3_times) < 2:
-            raise HTTPException(
-                status_code=503,
-                detail="Insufficient satellite data for prediction",
-            )
-
-        time_t = tempo_times[-1]
-        time_t1 = tempo_times[-2]
-        o3_time_t = o3_times[-1]
-        o3_time_t1 = o3_times[-2]
-
-        predictor = get_predictor(model_dir=str(MODEL_DIR))
-        results = []
-
-        for _, station_row in df_ground_truth.iterrows():
-            lat = station_row["lat"]
-            lon = station_row["lon"]
-            location_name = station_row.get(
-                "location_name", station_row.get("city", "Unknown")
-            )
-            pm25_true = station_row.get("pm25", station_row.get("pm25_raw"))
-
-            if pm25_true is None:
-                continue
-
-            no2_t = extract_near(df_tempo, lat, lon, time=time_t, value_col="no2")
-            no2_lag1 = extract_near(df_tempo, lat, lon, time=time_t1, value_col="no2")
-            o3_t = extract_near(df_o3, lat, lon, time=o3_time_t, value_col="o3")
-            o3_lag1 = extract_near(df_o3, lat, lon, time=o3_time_t1, value_col="o3")
-
-            if None in (no2_t, no2_lag1, o3_t, o3_lag1):
-                continue
-
-            hour = time_t.hour
-            dow = time_t.dayofweek
-
-            pred_result = predictor.predict(no2_t, no2_lag1, o3_t, o3_lag1, hour, dow)
-
-            results.append(
-                {
-                    "location_name": location_name,
-                    "lat": lat,
-                    "lon": lon,
-                    "pm25_predicted": pred_result["pm25_pred"],
-                    "pm25_observed": float(pm25_true),
-                    "error": pred_result["pm25_pred"] - float(pm25_true),
-                    "abs_error": abs(pred_result["pm25_pred"] - float(pm25_true)),
-                }
-            )
-
-        if not results:
-            raise HTTPException(
-                status_code=404, detail="No valid predictions could be made"
-            )
-
-        errors = [r["error"] for r in results]
-        abs_errors = [r["abs_error"] for r in results]
-
-        metrics = {
-            "mae": float(np.mean(abs_errors)),
-            "rmse": float(np.sqrt(np.mean([e**2 for e in errors]))),
-            "mbe": float(np.mean(errors)),
-            "n_stations": len(results),
-        }
-
-        return {
-            "comparison": results,
-            "metrics": metrics,
-            "prediction_time": time_t.isoformat(),
-            "observation_time": df_ground_truth["time"].max().isoformat(),
-        }
-
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500, detail=f"Comparison failed: {exc}"
-        ) from exc
+# @app.get("/api/compare")
+# async def compare_predictions():
+#     from src.features import extract_near
+#     from src.model import get_predictor
+#     import numpy as np
+#
+#     try:
+#         df_ground_truth = load_openaq_latest_data()
+#
+#         df_tempo = load_tempo_data()
+#         df_o3 = load_o3_static_data()
+#
+#         tempo_times = sorted(df_tempo["time"].unique())
+#         o3_times = sorted(df_o3["time"].unique())
+#
+#         if len(tempo_times) < 2 or len(o3_times) < 2:
+#             raise HTTPException(
+#                 status_code=503,
+#                 detail="Insufficient satellite data for prediction",
+#             )
+#
+#         time_t = tempo_times[-1]
+#         time_t1 = tempo_times[-2]
+#         o3_time_t = o3_times[-1]
+#         o3_time_t1 = o3_times[-2]
+#
+#         predictor = get_predictor(model_dir=str(MODEL_DIR))
+#         results = []
+#
+#         for _, station_row in df_ground_truth.iterrows():
+#             lat = station_row["lat"]
+#             lon = station_row["lon"]
+#             location_name = station_row.get(
+#                 "location_name", station_row.get("city", "Unknown")
+#             )
+#             pm25_true = station_row.get("pm25", station_row.get("pm25_raw"))
+#
+#             if pm25_true is None:
+#                 continue
+#
+#             no2_t = extract_near(df_tempo, lat, lon, time=time_t, value_col="no2")
+#             no2_lag1 = extract_near(df_tempo, lat, lon, time=time_t1, value_col="no2")
+#             o3_t = extract_near(df_o3, lat, lon, time=o3_time_t, value_col="o3")
+#             o3_lag1 = extract_near(df_o3, lat, lon, time=o3_time_t1, value_col="o3")
+#
+#             if None in (no2_t, no2_lag1, o3_t, o3_lag1):
+#                 continue
+#
+#             hour = time_t.hour
+#             dow = time_t.dayofweek
+#
+#             pred_result = predictor.predict(no2_t, no2_lag1, o3_t, o3_lag1, hour, dow)
+#
+#             results.append(
+#                 {
+#                     "location_name": location_name,
+#                     "lat": lat,
+#                     "lon": lon,
+#                     "pm25_predicted": pred_result["pm25_pred"],
+#                     "pm25_observed": float(pm25_true),
+#                     "error": pred_result["pm25_pred"] - float(pm25_true),
+#                     "abs_error": abs(pred_result["pm25_pred"] - float(pm25_true)),
+#                 }
+#             )
+#
+#         if not results:
+#             raise HTTPException(
+#                 status_code=404, detail="No valid predictions could be made"
+#             )
+#
+#         errors = [r["error"] for r in results]
+#         abs_errors = [r["abs_error"] for r in results]
+#
+#         metrics = {
+#             "mae": float(np.mean(abs_errors)),
+#             "rmse": float(np.sqrt(np.mean([e**2 for e in errors]))),
+#             "mbe": float(np.mean(errors)),
+#             "n_stations": len(results),
+#         }
+#
+#         return {
+#             "comparison": results,
+#             "metrics": metrics,
+#             "prediction_time": time_t.isoformat(),
+#             "observation_time": df_ground_truth["time"].max().isoformat(),
+#         }
+#
+#     except HTTPException:
+#         raise
+#     except Exception as exc:
+#         raise HTTPException(
+#             status_code=500, detail=f"Comparison failed: {exc}"
+#         ) from exc
 
 
 if __name__ == "__main__":
