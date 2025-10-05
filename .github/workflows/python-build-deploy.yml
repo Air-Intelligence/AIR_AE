@@ -53,23 +53,32 @@ jobs:
       - name: Send Success Discord Notification
         if: success()
         run: |
+          repo_name=${{ github.event.repository.name }}
+          branch=${{ github.ref_name }}
           curl -H "Content-Type: application/json" \
-            -d "{\"content\": \"**✅ 배포 성공!** :rocket:\n저장소: \`${repo_name}\`\n브랜치: \`${{ github.ref_name }}\`\n빌드 및 배포가 완료되었습니다.\"}" \
+            -d "{\"content\": \"**✅ 배포 성공!** :rocket:\\n저장소: \`${repo_name}\`\\n브랜치: \`${branch}\`\\n빌드 및 배포가 완료되었습니다.\"}" \
             ${{ secrets.DISCORD_WEBHOOK_URL }}
-            
+
       - name: Send Failure Discord Notification
         if: failure()
         run: |
+          repo_name=${{ github.event.repository.name }}
+          branch=${{ github.ref_name }}
+
           outcome_message=""
-          if [ "${{ steps.build.outcome }}" == "failure" ]; then
-            outcome_message+="빌드 단계에서 오류 발생.\n"
+          if [ \"${{ steps.build.outcome }}\" == \"failure\" ]; then
+            outcome_message+="빌드 단계에서 오류 발생.\\n"
           fi
-          if [ "${{ steps.docker_build.outcome }}" == "failure" ]; then
-            outcome_message+="Docker 빌드 단계에서 오류 발생.\n"
+          if [ \"${{ steps.docker_build.outcome }}\" == \"failure\" ]; then
+            outcome_message+="Docker 빌드 단계에서 오류 발생.\\n"
           fi
-          if [ "${{ steps.deploy.outcome }}" == "failure" ]; then
-            outcome_message+="배포 단계에서 오류 발생.\n"
+          if [ \"${{ steps.deploy.outcome }}\" == \"failure\" ]; then
+            outcome_message+="배포 단계에서 오류 발생.\\n"
           fi
+          if [ -z \"$outcome_message\" ]; then
+            outcome_message="원인 불명 오류.\\n"
+          fi
+
           curl -H "Content-Type: application/json" \
-            -d "{\"content\": \"**❌ 배포 실패!** :x:\n저장소: \`${repo_name}\`\n브랜치: \`${{ github.ref_name }}\`\n에러가 발생했습니다. 자세한 내용은 GitHub Actions 로그를 확인하세요.\"}" \
+            -d "{\"content\": \"**❌ 배포 실패!** :x:\\n저장소: \`${repo_name}\`\\n브랜치: \`${branch}\`\\n${outcome_message}자세한 내용은 GitHub Actions 로그를 확인하세요.\"}" \
             ${{ secrets.DISCORD_WEBHOOK_URL }}
