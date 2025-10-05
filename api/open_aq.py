@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 import pandas as pd
 from pathlib import Path
 import sys
+
 sys.path.append(str(Path(__file__).parent.parent))
 
 # 글로벌 변수로 데이터 캐싱 (서버 시작 시 한 번만 로드)
@@ -31,8 +32,10 @@ def load_tempo_data() -> pd.DataFrame:
             raise FileNotFoundError(f"TEMPO Parquet not found: {TEMPO_PARQUET_PATH}")
 
         df_tempo_cache = pd.read_parquet(TEMPO_PARQUET_PATH)
-        df_tempo_cache['time'] = pd.to_datetime(df_tempo_cache['time'])
-        print(f"✓ Loaded TEMPO: {len(df_tempo_cache):,} records from {TEMPO_PARQUET_PATH}")
+        df_tempo_cache["time"] = pd.to_datetime(df_tempo_cache["time"])
+        print(
+            f"✓ Loaded TEMPO: {len(df_tempo_cache):,} records from {TEMPO_PARQUET_PATH}"
+        )
 
     return df_tempo_cache
 
@@ -46,8 +49,10 @@ def load_openaq_data() -> pd.DataFrame:
             raise FileNotFoundError(f"OpenAQ Parquet not found: {OPENAQ_PARQUET_PATH}")
 
         df_openaq_cache = pd.read_parquet(OPENAQ_PARQUET_PATH)
-        df_openaq_cache['time'] = pd.to_datetime(df_openaq_cache['time'])
-        print(f"✓ Loaded OpenAQ: {len(df_openaq_cache):,} records from {OPENAQ_PARQUET_PATH}")
+        df_openaq_cache["time"] = pd.to_datetime(df_openaq_cache["time"])
+        print(
+            f"✓ Loaded OpenAQ: {len(df_openaq_cache):,} records from {OPENAQ_PARQUET_PATH}"
+        )
 
     return df_openaq_cache
 
@@ -58,12 +63,18 @@ def load_o3_static_data() -> pd.DataFrame:
 
     if df_o3_static_cache is None:
         if not O3_STATIC_PARQUET_PATH.exists():
-            raise FileNotFoundError(f"O3 Static Parquet not found: {O3_STATIC_PARQUET_PATH}")
+            raise FileNotFoundError(
+                f"O3 Static Parquet not found: {O3_STATIC_PARQUET_PATH}"
+            )
 
         df_o3_static_cache = pd.read_parquet(O3_STATIC_PARQUET_PATH)
-        df_o3_static_cache['time'] = pd.to_datetime(df_o3_static_cache['time'])
-        print(f"✓ Loaded O3 Static: {len(df_o3_static_cache):,} records from {O3_STATIC_PARQUET_PATH}")
-        print(f"  ⚠️  O3는 정적 데이터 (실시간 아님): {df_o3_static_cache['time'].min()} ~ {df_o3_static_cache['time'].max()}")
+        df_o3_static_cache["time"] = pd.to_datetime(df_o3_static_cache["time"])
+        print(
+            f"✓ Loaded O3 Static: {len(df_o3_static_cache):,} records from {O3_STATIC_PARQUET_PATH}"
+        )
+        print(
+            f"  ⚠️  O3는 정적 데이터 (실시간 아님): {df_o3_static_cache['time'].min()} ~ {df_o3_static_cache['time'].max()}"
+        )
 
     return df_o3_static_cache
 
@@ -77,8 +88,10 @@ def load_airnow_data() -> pd.DataFrame:
             raise FileNotFoundError(f"AirNow CSV not found: {AIRNOW_CSV_PATH}")
 
         df_airnow_cache = pd.read_csv(AIRNOW_CSV_PATH)
-        df_airnow_cache['time'] = pd.to_datetime(df_airnow_cache['time'])
-        print(f"✓ Loaded AirNow: {len(df_airnow_cache):,} records from {AIRNOW_CSV_PATH}")
+        df_airnow_cache["time"] = pd.to_datetime(df_airnow_cache["time"])
+        print(
+            f"✓ Loaded AirNow: {len(df_airnow_cache):,} records from {AIRNOW_CSV_PATH}"
+        )
         print(f"  Latest observation: {df_airnow_cache['time'].max()}")
 
     return df_airnow_cache
@@ -90,11 +103,15 @@ def load_openaq_latest_data() -> pd.DataFrame:
 
     if df_openaq_latest_cache is None:
         if not OPENAQ_LATEST_CSV_PATH.exists():
-            raise FileNotFoundError(f"OpenAQ Latest CSV not found: {OPENAQ_LATEST_CSV_PATH}")
+            raise FileNotFoundError(
+                f"OpenAQ Latest CSV not found: {OPENAQ_LATEST_CSV_PATH}"
+            )
 
         df_openaq_latest_cache = pd.read_csv(OPENAQ_LATEST_CSV_PATH)
-        df_openaq_latest_cache['time'] = pd.to_datetime(df_openaq_latest_cache['time'])
-        print(f"✓ Loaded OpenAQ Latest: {len(df_openaq_latest_cache):,} records from {OPENAQ_LATEST_CSV_PATH}")
+        df_openaq_latest_cache["time"] = pd.to_datetime(df_openaq_latest_cache["time"])
+        print(
+            f"✓ Loaded OpenAQ Latest: {len(df_openaq_latest_cache):,} records from {OPENAQ_LATEST_CSV_PATH}"
+        )
         print(f"  Latest observation: {df_openaq_latest_cache['time'].max()}")
         print(f"  Stations: {df_openaq_latest_cache['location_name'].nunique()}")
 
@@ -145,7 +162,7 @@ app = FastAPI(
     title="TEMPO NRT API",
     description="NASA TEMPO 실시간 대기질 데이터 API",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # CORS 설정 (프론트엔드 연동용)
@@ -170,25 +187,17 @@ async def root():
                 "/api/latest",
                 "/api/timeseries",
                 "/api/heatmap",
-                "/api/grid"
+                "/api/grid",
             ],
             "OpenAQ (PM2.5 실측)": [
                 "/api/pm25/stations",
                 "/api/pm25/latest",
-                "/api/pm25/timeseries"
+                "/api/pm25/timeseries",
             ],
-            "AirNow (PM2.5 실측)": [
-                "/api/airnow/latest",
-                "/api/airnow/stations"
-            ],
-            "결합 데이터": [
-                "/api/combined/latest"
-            ],
-            "예측 및 비교": [
-                "/api/predict",
-                "/api/compare"
-            ]
-        }
+            "AirNow (PM2.5 실측)": ["/api/airnow/latest", "/api/airnow/stations"],
+            "결합 데이터": ["/api/combined/latest"],
+            "예측 및 비교": ["/api/predict", "/api/compare"],
+        },
     }
 
 
@@ -203,29 +212,29 @@ async def get_stats():
     return {
         "total_records": len(df),
         "time_range": {
-            "start": df['time'].min().isoformat(),
-            "end": df['time'].max().isoformat(),
-            "unique_times": int(df['time'].nunique())
+            "start": df["time"].min().isoformat(),
+            "end": df["time"].max().isoformat(),
+            "unique_times": int(df["time"].nunique()),
         },
         "spatial_range": {
-            "lat_min": float(df['lat'].min()),
-            "lat_max": float(df['lat'].max()),
-            "lon_min": float(df['lon'].min()),
-            "lon_max": float(df['lon'].max()),
-            "unique_locations": len(df[['lat', 'lon']].drop_duplicates())
+            "lat_min": float(df["lat"].min()),
+            "lat_max": float(df["lat"].max()),
+            "lon_min": float(df["lon"].min()),
+            "lon_max": float(df["lon"].max()),
+            "unique_locations": len(df[["lat", "lon"]].drop_duplicates()),
         },
         "variables": {
             "no2": {
-                "min": float(df['no2'].min()),
-                "max": float(df['no2'].max()),
-                "mean": float(df['no2'].mean())
+                "min": float(df["no2"].min()),
+                "max": float(df["no2"].max()),
+                "mean": float(df["no2"].mean()),
             },
             "o3": {
-                "min": float(df['o3'].min()),
-                "max": float(df['o3'].max()),
-                "mean": float(df['o3'].mean())
-            }
-        }
+                "min": float(df["o3"].min()),
+                "max": float(df["o3"].max()),
+                "mean": float(df["o3"].mean()),
+            },
+        },
     }
 
 
@@ -244,26 +253,26 @@ async def get_latest(
     if variable not in df.columns:
         raise HTTPException(
             status_code=400,
-            detail=f"Variable '{variable}' not found. Available: {list(df.columns)}"
+            detail=f"Variable '{variable}' not found. Available: {list(df.columns)}",
         )
 
     # 최신 시간 데이터만 필터링
-    latest_time = df['time'].max()
-    df_latest = df[df['time'] == latest_time].copy()
+    latest_time = df["time"].max()
+    df_latest = df[df["time"] == latest_time].copy()
 
     # 결측치 제거
     df_latest = df_latest.dropna(subset=[variable])
 
     # NO2, O3 스케일링 (1e15로 나눔)
-    if variable in ['no2', 'o3']:
+    if variable in ["no2", "o3"]:
         df_latest[variable] = df_latest[variable] / 1e15
 
     return {
         "time": latest_time.isoformat(),
         "variable": variable,
-        "unit": "×10¹⁵ molecules/cm²" if variable in ['no2', 'o3'] else None,
+        "unit": "×10¹⁵ molecules/cm²" if variable in ["no2", "o3"] else None,
         "count": len(df_latest),
-        "data": df_latest[['lat', 'lon', variable]].to_dict(orient='records')
+        "data": df_latest[["lat", "lon", variable]].to_dict(orient="records"),
     }
 
 
@@ -272,7 +281,7 @@ async def get_timeseries(
     lat: float = Query(..., description="위도"),
     lon: float = Query(..., description="경도"),
     variable: str = Query("no2", description="변수명"),
-    radius: float = Query(0.05, description="검색 반경 (도 단위)")
+    radius: float = Query(0.05, description="검색 반경 (도 단위)"),
 ):
     """
     특정 위치의 시계열 데이터
@@ -281,50 +290,45 @@ async def get_timeseries(
     df = load_tempo_data()
 
     if variable not in df.columns:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Variable '{variable}' not found"
-        )
+        raise HTTPException(status_code=400, detail=f"Variable '{variable}' not found")
 
     # 지정 위치 근처 데이터 필터링 (반경 내)
     df_nearby = df[
-        (df['lat'] >= lat - radius) & (df['lat'] <= lat + radius) &
-        (df['lon'] >= lon - radius) & (df['lon'] <= lon + radius)
+        (df["lat"] >= lat - radius)
+        & (df["lat"] <= lat + radius)
+        & (df["lon"] >= lon - radius)
+        & (df["lon"] <= lon + radius)
     ].copy()
 
     if len(df_nearby) == 0:
         raise HTTPException(
-            status_code=404,
-            detail=f"No data found near ({lat}, {lon})"
+            status_code=404, detail=f"No data found near ({lat}, {lon})"
         )
 
     # 시간별 평균 계산
-    ts = df_nearby.groupby('time')[variable].mean().reset_index()
-    ts = ts.sort_values('time')
+    ts = df_nearby.groupby("time")[variable].mean().reset_index()
+    ts = ts.sort_values("time")
 
     # NO2, O3 스케일링 (1e15로 나눔)
-    if variable in ['no2', 'o3']:
+    if variable in ["no2", "o3"]:
         ts[variable] = ts[variable] / 1e15
 
     return {
         "location": {"lat": lat, "lon": lon},
         "variable": variable,
-        "unit": "×10¹⁵ molecules/cm²" if variable in ['no2', 'o3'] else None,
+        "unit": "×10¹⁵ molecules/cm²" if variable in ["no2", "o3"] else None,
         "count": len(ts),
         "data": [
-            {
-                "time": row['time'].isoformat(),
-                "value": float(row[variable])
-            }
+            {"time": row["time"].isoformat(), "value": float(row[variable])}
             for _, row in ts.iterrows()
-        ]
+        ],
     }
 
 
 @app.get("/api/heatmap")
 async def get_heatmap(
     time: Optional[str] = Query(None, description="ISO 시간 (예: 2025-10-03T23:00:00)"),
-    variable: str = Query("no2", description="변수명")
+    variable: str = Query("no2", description="변수명"),
 ):
     """
     특정 시간의 히트맵 데이터
@@ -339,33 +343,33 @@ async def get_heatmap(
     if time:
         target_time = pd.to_datetime(time)
         # 가장 가까운 시간 찾기
-        time_diff = (df['time'] - target_time).abs()
-        closest_time = df.loc[time_diff.idxmin(), 'time']
-        df_filtered = df[df['time'] == closest_time].copy()
+        time_diff = (df["time"] - target_time).abs()
+        closest_time = df.loc[time_diff.idxmin(), "time"]
+        df_filtered = df[df["time"] == closest_time].copy()
     else:
         # 최신 시간
-        latest_time = df['time'].max()
-        df_filtered = df[df['time'] == latest_time].copy()
+        latest_time = df["time"].max()
+        df_filtered = df[df["time"] == latest_time].copy()
 
     # 결측치 제거
     df_filtered = df_filtered.dropna(subset=[variable])
 
     # NO2, O3 스케일링 (1e15로 나눔)
-    if variable in ['no2', 'o3']:
+    if variable in ["no2", "o3"]:
         df_filtered[variable] = df_filtered[variable] / 1e15
 
     return {
-        "time": df_filtered['time'].iloc[0].isoformat(),
+        "time": df_filtered["time"].iloc[0].isoformat(),
         "variable": variable,
-        "unit": "×10¹⁵ molecules/cm²" if variable in ['no2', 'o3'] else None,
+        "unit": "×10¹⁵ molecules/cm²" if variable in ["no2", "o3"] else None,
         "count": len(df_filtered),
         "bounds": {
-            "lat_min": float(df_filtered['lat'].min()),
-            "lat_max": float(df_filtered['lat'].max()),
-            "lon_min": float(df_filtered['lon'].min()),
-            "lon_max": float(df_filtered['lon'].max())
+            "lat_min": float(df_filtered["lat"].min()),
+            "lat_max": float(df_filtered["lat"].max()),
+            "lon_min": float(df_filtered["lon"].min()),
+            "lon_max": float(df_filtered["lon"].max()),
         },
-        "data": df_filtered[['lat', 'lon', variable]].to_dict(orient='records')
+        "data": df_filtered[["lat", "lon", variable]].to_dict(orient="records"),
     }
 
 
@@ -377,7 +381,7 @@ async def get_grid(
     lon_max: float = Query(..., description="최대 경도"),
     variable: str = Query("no2", description="변수명"),
     time_start: Optional[str] = Query(None, description="시작 시간"),
-    time_end: Optional[str] = Query(None, description="종료 시간")
+    time_end: Optional[str] = Query(None, description="종료 시간"),
 ):
     """
     특정 영역의 그리드 데이터
@@ -390,15 +394,17 @@ async def get_grid(
 
     # 공간 필터링
     df_filtered = df[
-        (df['lat'] >= lat_min) & (df['lat'] <= lat_max) &
-        (df['lon'] >= lon_min) & (df['lon'] <= lon_max)
+        (df["lat"] >= lat_min)
+        & (df["lat"] <= lat_max)
+        & (df["lon"] >= lon_min)
+        & (df["lon"] <= lon_max)
     ].copy()
 
     # 시간 필터링
     if time_start:
-        df_filtered = df_filtered[df_filtered['time'] >= pd.to_datetime(time_start)]
+        df_filtered = df_filtered[df_filtered["time"] >= pd.to_datetime(time_start)]
     if time_end:
-        df_filtered = df_filtered[df_filtered['time'] <= pd.to_datetime(time_end)]
+        df_filtered = df_filtered[df_filtered["time"] <= pd.to_datetime(time_end)]
 
     # 결측치 제거
     df_filtered = df_filtered.dropna(subset=[variable])
@@ -407,7 +413,7 @@ async def get_grid(
         raise HTTPException(status_code=404, detail="No data found in specified region")
 
     # NO2, O3 스케일링 (1e15로 나눔)
-    if variable in ['no2', 'o3']:
+    if variable in ["no2", "o3"]:
         df_filtered[variable] = df_filtered[variable] / 1e15
 
     return {
@@ -415,16 +421,16 @@ async def get_grid(
             "lat_min": lat_min,
             "lat_max": lat_max,
             "lon_min": lon_min,
-            "lon_max": lon_max
+            "lon_max": lon_max,
         },
         "time_range": {
-            "start": df_filtered['time'].min().isoformat(),
-            "end": df_filtered['time'].max().isoformat()
+            "start": df_filtered["time"].min().isoformat(),
+            "end": df_filtered["time"].max().isoformat(),
         },
         "variable": variable,
-        "unit": "×10¹⁵ molecules/cm²" if variable in ['no2', 'o3'] else None,
+        "unit": "×10¹⁵ molecules/cm²" if variable in ["no2", "o3"] else None,
         "count": len(df_filtered),
-        "data": df_filtered[['time', 'lat', 'lon', variable]].to_dict(orient='records')
+        "data": df_filtered[["time", "lat", "lon", variable]].to_dict(orient="records"),
     }
 
 
@@ -437,20 +443,20 @@ async def get_pm25_stations():
     df = load_openaq_data()
 
     # 최신 데이터만 (각 관측소별 최근 측정값)
-    latest = df.sort_values('time').groupby(['lat', 'lon', 'location_name']).tail(1)
+    latest = df.sort_values("time").groupby(["lat", "lon", "location_name"]).tail(1)
 
     return {
         "count": len(latest),
         "stations": [
             {
-                "lat": row['lat'],
-                "lon": row['lon'],
-                "name": row['location_name'],
-                "pm25": float(row['pm25']),
-                "time": row['time'].isoformat()
+                "lat": row["lat"],
+                "lon": row["lon"],
+                "name": row["location_name"],
+                "pm25": float(row["pm25"]),
+                "time": row["time"].isoformat(),
             }
             for _, row in latest.iterrows()
-        ]
+        ],
     }
 
 
@@ -458,19 +464,33 @@ async def get_pm25_stations():
 async def get_pm25_latest():
     """
     OpenAQ PM2.5 최신 실측값
-    - 전체 관측소의 최신 데이터
+    - 우선 최신 CSV(/raw/OpenAQ/latest_observations.csv) 사용
+    - 없으면 NRT Parquet로 폴백
     """
-    df = load_openaq_data()
-
-    # 최신 시간
-    latest_time = df['time'].max()
-    df_latest = df[df['time'] == latest_time].copy()
-
-    return {
-        "time": latest_time.isoformat(),
-        "count": len(df_latest),
-        "data": df_latest[['lat', 'lon', 'pm25', 'location_name']].to_dict(orient='records')
-    }
+    try:
+        df_csv = load_openaq_latest_data()
+        latest_time = df_csv["time"].max()
+        df_latest = df_csv[df_csv["time"] == latest_time].copy()
+        return {
+            "source": "csv",
+            "time": latest_time.isoformat(),
+            "count": len(df_latest),
+            "data": df_latest[["lat", "lon", "pm25", "location_name"]].to_dict(
+                orient="records"
+            ),
+        }
+    except FileNotFoundError:
+        df = load_openaq_data()
+        latest_time = df["time"].max()
+        df_latest = df[df["time"] == latest_time].copy()
+        return {
+            "source": "parquet",
+            "time": latest_time.isoformat(),
+            "count": len(df_latest),
+            "data": df_latest[["lat", "lon", "pm25", "location_name"]].to_dict(
+                orient="records"
+            ),
+        }
 
 
 @app.get("/api/pm25/timeseries")
@@ -484,32 +504,28 @@ async def get_pm25_timeseries(
     df = load_openaq_data()
 
     if location_name:
-        df_filtered = df[df['location_name'] == location_name].copy()
+        df_filtered = df[df["location_name"] == location_name].copy()
 
         if len(df_filtered) == 0:
             raise HTTPException(
-                status_code=404,
-                detail=f"Station '{location_name}' not found"
+                status_code=404, detail=f"Station '{location_name}' not found"
             )
 
         # 시간별 평균 (같은 관측소의 중복 데이터 처리)
-        ts = df_filtered.groupby('time')['pm25'].mean().reset_index()
+        ts = df_filtered.groupby("time")["pm25"].mean().reset_index()
     else:
         # 전체 관측소 평균
-        ts = df.groupby('time')['pm25'].mean().reset_index()
+        ts = df.groupby("time")["pm25"].mean().reset_index()
 
-    ts = ts.sort_values('time')
+    ts = ts.sort_values("time")
 
     return {
         "location": location_name or "All Stations (Average)",
         "count": len(ts),
         "data": [
-            {
-                "time": row['time'].isoformat(),
-                "pm25": float(row['pm25'])
-            }
+            {"time": row["time"].isoformat(), "pm25": float(row["pm25"])}
             for _, row in ts.iterrows()
-        ]
+        ],
     }
 
 
@@ -522,31 +538,35 @@ async def get_combined_latest():
     """
     # TEMPO 최신 데이터
     df_tempo = load_tempo_data()
-    latest_tempo_time = df_tempo['time'].max()
-    df_tempo_latest = df_tempo[df_tempo['time'] == latest_tempo_time].copy()
+    latest_tempo_time = df_tempo["time"].max()
+    df_tempo_latest = df_tempo[df_tempo["time"] == latest_tempo_time].copy()
 
     # NO2, O3 스케일링 (1e15로 나눔)
-    df_tempo_latest['no2'] = df_tempo_latest['no2'] / 1e15
-    df_tempo_latest['o3'] = df_tempo_latest['o3'] / 1e15
+    df_tempo_latest["no2"] = df_tempo_latest["no2"] / 1e15
+    df_tempo_latest["o3"] = df_tempo_latest["o3"] / 1e15
 
     # OpenAQ 최신 데이터
     df_openaq = load_openaq_data()
-    latest_openaq_time = df_openaq['time'].max()
-    df_openaq_latest = df_openaq[df_openaq['time'] == latest_openaq_time].copy()
+    latest_openaq_time = df_openaq["time"].max()
+    df_openaq_latest = df_openaq[df_openaq["time"] == latest_openaq_time].copy()
 
     return {
         "tempo": {
             "time": latest_tempo_time.isoformat(),
             "count": len(df_tempo_latest),
             "unit": "×10¹⁵ molecules/cm²",
-            "data": df_tempo_latest[['lat', 'lon', 'no2', 'o3']].to_dict(orient='records')
+            "data": df_tempo_latest[["lat", "lon", "no2", "o3"]].to_dict(
+                orient="records"
+            ),
         },
         "openaq": {
             "time": latest_openaq_time.isoformat(),
             "count": len(df_openaq_latest),
             "unit": "µg/m³",
-            "data": df_openaq_latest[['lat', 'lon', 'pm25', 'location_name']].to_dict(orient='records')
-        }
+            "data": df_openaq_latest[["lat", "lon", "pm25", "location_name"]].to_dict(
+                orient="records"
+            ),
+        },
     }
 
 
@@ -554,7 +574,7 @@ async def get_combined_latest():
 async def predict_pm25(
     lat: float = Query(..., description="위도"),
     lon: float = Query(..., description="경도"),
-    city: str = Query("San Francisco", description="도시명")
+    city: str = Query("San Francisco", description="도시명"),
 ):
     """
     PM2.5 예측 (1시간 후)
@@ -571,47 +591,42 @@ async def predict_pm25(
         df_tempo = load_tempo_data()
 
         # 최신 2개 시간 추출 (t, t-1)
-        tempo_times = sorted(df_tempo['time'].unique())
+        tempo_times = sorted(df_tempo["time"].unique())
         if len(tempo_times) < 2:
             raise HTTPException(
                 status_code=503,
-                detail="Insufficient TEMPO data (need at least 2 time points)"
+                detail="Insufficient TEMPO data (need at least 2 time points)",
             )
 
         time_t = tempo_times[-1]
         time_t1 = tempo_times[-2]
 
         # 2. (lat, lon) 근처 NO₂ 추출
-        no2_t = extract_near(df_tempo, lat, lon, time=time_t, value_col='no2')
-        no2_lag1 = extract_near(df_tempo, lat, lon, time=time_t1, value_col='no2')
+        no2_t = extract_near(df_tempo, lat, lon, time=time_t, value_col="no2")
+        no2_lag1 = extract_near(df_tempo, lat, lon, time=time_t1, value_col="no2")
 
         if no2_t is None or no2_lag1 is None:
             raise HTTPException(
-                status_code=404,
-                detail=f"No TEMPO NO₂ data near ({lat}, {lon})"
+                status_code=404, detail=f"No TEMPO NO₂ data near ({lat}, {lon})"
             )
 
         # 3. O₃ 정적 데이터 로드 (TEMPO O3 Standard V04)
         df_o3 = load_o3_static_data()
 
-        o3_times = sorted(df_o3['time'].unique())
+        o3_times = sorted(df_o3["time"].unique())
         if len(o3_times) < 2:
-            raise HTTPException(
-                status_code=503,
-                detail="Insufficient O₃ static data"
-            )
+            raise HTTPException(status_code=503, detail="Insufficient O₃ static data")
 
         o3_time_t = o3_times[-1]
         o3_time_t1 = o3_times[-2]
 
         # 4. (lat, lon) 근처 O₃ 추출
-        o3_t = extract_near(df_o3, lat, lon, time=o3_time_t, value_col='o3')
-        o3_lag1 = extract_near(df_o3, lat, lon, time=o3_time_t1, value_col='o3')
+        o3_t = extract_near(df_o3, lat, lon, time=o3_time_t, value_col="o3")
+        o3_lag1 = extract_near(df_o3, lat, lon, time=o3_time_t1, value_col="o3")
 
         if o3_t is None or o3_lag1 is None:
             raise HTTPException(
-                status_code=404,
-                detail=f"No O₃ data near ({lat}, {lon})"
+                status_code=404, detail=f"No O₃ data near ({lat}, {lon})"
             )
 
         # 5. 시간 피처
@@ -624,32 +639,25 @@ async def predict_pm25(
 
         # 7. 응답 생성
         return {
-            "predicted_pm25": result['pm25_pred'],
-            "confidence_lower": result['confidence_lower'],
-            "confidence_upper": result['confidence_upper'],
+            "predicted_pm25": result["pm25_pred"],
+            "confidence_lower": result["confidence_lower"],
+            "confidence_upper": result["confidence_upper"],
             "prediction_time": time_t.isoformat(),
-            "location": {
-                "lat": lat,
-                "lon": lon,
-                "city": city
-            },
+            "location": {"lat": lat, "lon": lon, "city": city},
             "inputs": {
                 "no2_current": no2_t,
                 "no2_lag1": no2_lag1,
                 "o3_current": o3_t,
                 "o3_lag1": o3_lag1,
                 "hour": hour,
-                "dow": dow
-            }
+                "dow": dow,
+            },
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Prediction failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
 
 
 @app.get("/api/airnow/latest")
@@ -661,21 +669,21 @@ async def get_airnow_latest():
     df = load_airnow_data()
 
     return {
-        "time": df['time'].max().isoformat(),
+        "time": df["time"].max().isoformat(),
         "count": len(df),
         "data": [
             {
-                "city": row['city'],
-                "lat": row['lat'],
-                "lon": row['lon'],
-                "pm25": float(row['pm25_raw']),
-                "aqi": int(row['pm25']),
-                "category": row['category'],
-                "site_name": row['site_name'],
-                "time": row['time'].isoformat()
+                "city": row["city"],
+                "lat": row["lat"],
+                "lon": row["lon"],
+                "pm25": float(row["pm25_raw"]),
+                "aqi": int(row["pm25"]),
+                "category": row["category"],
+                "site_name": row["site_name"],
+                "time": row["time"].isoformat(),
             }
             for _, row in df.iterrows()
-        ]
+        ],
     }
 
 
@@ -691,17 +699,17 @@ async def get_airnow_stations():
         "count": len(df),
         "stations": [
             {
-                "city": row['city'],
-                "lat": row['lat'],
-                "lon": row['lon'],
-                "site_name": row['site_name'],
-                "pm25": float(row['pm25_raw']),
-                "aqi": int(row['pm25']),
-                "category": row['category'],
-                "time": row['time'].isoformat()
+                "city": row["city"],
+                "lat": row["lat"],
+                "lon": row["lon"],
+                "site_name": row["site_name"],
+                "pm25": float(row["pm25_raw"]),
+                "aqi": int(row["pm25"]),
+                "category": row["category"],
+                "time": row["time"].isoformat(),
             }
             for _, row in df.iterrows()
-        ]
+        ],
     }
 
 
@@ -729,13 +737,12 @@ async def compare_predictions():
         df_o3 = load_o3_static_data()
 
         # 최신 시간 추출
-        tempo_times = sorted(df_tempo['time'].unique())
-        o3_times = sorted(df_o3['time'].unique())
+        tempo_times = sorted(df_tempo["time"].unique())
+        o3_times = sorted(df_o3["time"].unique())
 
         if len(tempo_times) < 2 or len(o3_times) < 2:
             raise HTTPException(
-                status_code=503,
-                detail="Insufficient satellite data for prediction"
+                status_code=503, detail="Insufficient satellite data for prediction"
             )
 
         time_t = tempo_times[-1]
@@ -748,21 +755,23 @@ async def compare_predictions():
         results = []
 
         for _, station_row in df_ground_truth.iterrows():
-            lat = station_row['lat']
-            lon = station_row['lon']
-            location_name = station_row.get('location_name', station_row.get('city', 'Unknown'))
-            pm25_true = station_row.get('pm25', station_row.get('pm25_raw', None))
+            lat = station_row["lat"]
+            lon = station_row["lon"]
+            location_name = station_row.get(
+                "location_name", station_row.get("city", "Unknown")
+            )
+            pm25_true = station_row.get("pm25", station_row.get("pm25_raw", None))
 
             if pm25_true is None:
                 continue
 
             # NO₂ 추출
-            no2_t = extract_near(df_tempo, lat, lon, time=time_t, value_col='no2')
-            no2_lag1 = extract_near(df_tempo, lat, lon, time=time_t1, value_col='no2')
+            no2_t = extract_near(df_tempo, lat, lon, time=time_t, value_col="no2")
+            no2_lag1 = extract_near(df_tempo, lat, lon, time=time_t1, value_col="no2")
 
             # O₃ 추출
-            o3_t = extract_near(df_o3, lat, lon, time=o3_time_t, value_col='o3')
-            o3_lag1 = extract_near(df_o3, lat, lon, time=o3_time_t1, value_col='o3')
+            o3_t = extract_near(df_o3, lat, lon, time=o3_time_t, value_col="o3")
+            o3_lag1 = extract_near(df_o3, lat, lon, time=o3_time_t1, value_col="o3")
 
             if no2_t is None or no2_lag1 is None or o3_t is None or o3_lag1 is None:
                 continue
@@ -774,47 +783,45 @@ async def compare_predictions():
             # 예측
             pred_result = predictor.predict(no2_t, no2_lag1, o3_t, o3_lag1, hour, dow)
 
-            results.append({
-                "location_name": location_name,
-                "lat": lat,
-                "lon": lon,
-                "pm25_predicted": pred_result['pm25_pred'],
-                "pm25_observed": float(pm25_true),
-                "error": pred_result['pm25_pred'] - float(pm25_true),
-                "abs_error": abs(pred_result['pm25_pred'] - float(pm25_true))
-            })
+            results.append(
+                {
+                    "location_name": location_name,
+                    "lat": lat,
+                    "lon": lon,
+                    "pm25_predicted": pred_result["pm25_pred"],
+                    "pm25_observed": float(pm25_true),
+                    "error": pred_result["pm25_pred"] - float(pm25_true),
+                    "abs_error": abs(pred_result["pm25_pred"] - float(pm25_true)),
+                }
+            )
 
         if len(results) == 0:
             raise HTTPException(
-                status_code=404,
-                detail="No valid predictions could be made"
+                status_code=404, detail="No valid predictions could be made"
             )
 
         # 4. 성능 메트릭 계산
-        errors = [r['error'] for r in results]
-        abs_errors = [r['abs_error'] for r in results]
+        errors = [r["error"] for r in results]
+        abs_errors = [r["abs_error"] for r in results]
 
         metrics = {
             "mae": float(np.mean(abs_errors)),
             "rmse": float(np.sqrt(np.mean([e**2 for e in errors]))),
             "mbe": float(np.mean(errors)),
-            "n_stations": len(results)
+            "n_stations": len(results),
         }
 
         return {
             "comparison": results,
             "metrics": metrics,
             "prediction_time": time_t.isoformat(),
-            "observation_time": df_ground_truth['time'].max().isoformat()
+            "observation_time": df_ground_truth["time"].max().isoformat(),
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Comparison failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Comparison failed: {str(e)}")
 
 
 if __name__ == "__main__":
@@ -826,5 +833,5 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8000,  # 포트: 8000
         reload=True,  # 코드 변경 시 자동 재시작
-        log_level="info"
+        log_level="info",
     )
