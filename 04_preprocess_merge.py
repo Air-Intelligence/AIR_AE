@@ -10,11 +10,6 @@ import xarray as xr
 import pandas as pd
 import numpy as np
 from pathlib import Path
-import sys
-
-# 프로젝트 루트를 Python path에 추가
-sys.path.append(str(Path(__file__).parent.parent))
-
 from glob import glob
 from typing import Dict, List
 import config
@@ -57,13 +52,15 @@ def process_tempo_files(
                 # Subset to BBOX
                 ds = utils.subset_bbox(ds)
 
-                # Rename variables using mapping
-                for raw_name, std_name in var_name_mapping.items():
-                    if raw_name in ds:
-                        ds = ds.rename({raw_name: std_name})
+                # Convert to tidy (원본 변수명 그대로)
+                df = utils.netcdf_to_tidy(ds, var_mapping=None)
 
-                # Convert to tidy
-                df = utils.netcdf_to_tidy(ds, var_mapping=None)  # Already renamed
+                # Rename columns after tidy conversion
+                # 'weight' → 해당 product의 표준 변수명
+                if 'weight' in df.columns:
+                    # var_name_mapping에서 target 변수명 추출
+                    target_var = list(var_name_mapping.values())[0]
+                    df = df.rename(columns={'weight': target_var})
 
             all_dfs.append(df)
 
@@ -134,14 +131,17 @@ def main():
         df_o3 = utils.resample_time(df_o3)
 
     # ========================================================================
-    # 4. Merge datasets using nearest time matching
+    # 4. Merge datasets using time + spatial matching
     # ========================================================================
     logger.info("\nMerging NO2 and O3...")
 
-    # Merge NO2 and O3
-    df_merged = utils.merge_time_nearest(
-        df_no2, df_o3,
-        tol=config.LABEL_JOIN["time_tolerance"]
+    # 시간 + 위치(lat, lon) 기준으로 병합
+    df_merged = pd.merge(
+        df_no2,
+        df_o3,
+        on=['time', 'lat', 'lon'],
+        how='inner',
+        suffixes=('', '_o3')  # O3 중복 컬럼에 _o3 붙이기
     )
 
     if len(df_merged) == 0:
@@ -149,6 +149,7 @@ def main():
         return
 
     logger.info(f"✓ Merged: {len(df_merged):,} rows, {len(df_merged.columns)} columns")
+    logger.info(f"Merged columns: {df_merged.columns.tolist()}")
 
     # ========================================================================
     # 5. Apply QC
@@ -156,9 +157,6 @@ def main():
     logger.info("\nApplying QC...")
 
     df_merged = utils.apply_qc(df_merged)
-
-    logger.info(f"Merged columns: {df_merged.columns.tolist()}")
-    logger.info(f"First few rows:\n{df_merged.head()}")
 
     # Drop rows with missing key features
     df_merged = df_merged.dropna(subset=["no2", "o3"])
